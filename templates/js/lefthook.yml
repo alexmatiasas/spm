@@ -1,0 +1,14 @@
+pre-commit:
+  parallel: true
+  commands:
+    biome-check:
+      run: biome check --staged --write
+    biome-format:
+      run: biome format --staged --write
+
+pre-push:
+  commands:
+    npm-lint:
+      run: npm run lint
+    npm-test:
+      run: npm run test
