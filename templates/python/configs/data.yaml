@@ -1,0 +1,9 @@
+# Default data config
+download:
+  source: ""
+  version: ""
+
+process:
+  test_size: 0.2
+  random_state: 42
+  normalize: true

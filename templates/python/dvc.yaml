@@ -1,0 +1,36 @@
+stages:
+  download:
+    cmd: echo "Download data"
+    deps:
+      - data/raw
+    params:
+      - data.download
+
+  process:
+    cmd: echo "Process data"
+    deps:
+      - data/raw
+    outs:
+      - data/processed
+    params:
+      - data.process
+
+  train:
+    cmd: echo "Train model"
+    deps:
+      - data/processed
+      - configs/train.yaml
+    outs:
+      - models
+    params:
+      - model.train
+
+  evaluate:
+    cmd: echo "Evaluate model"
+    deps:
+      - models
+      - data/processed
+    outs:
+      - reports
+    params:
+      - model.evaluate
