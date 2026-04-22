@@ -1,0 +1,15 @@
+# Shell
+*.log
+*.tmp
+
+# Hooks
+.lefthook/
+
+# IDEs
+.vscode/
+.idea/
+
+# Secrets
+*.pem
+*.key
+secrets/

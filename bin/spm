@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2154
+set -euo pipefail
+
+LIB_DIR="${HOME}/projects/shell/spm/lib"
+
+source "${LIB_DIR}/core.sh"
+source "${LIB_DIR}/registry.sh"
+
+cmd_new() {
+	local project_type=""
+	local project_name=""
+	local dry_run=false
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-d | --dry-run)
+			dry_run=true
+			shift
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		-*)
+			log_error "Unknown option: $1"
+			usage
+			exit 1
+			;;
+		*)
+			if [[ -z "$project_type" ]]; then
+				project_type="$1"
+			elif [[ -z "$project_name" ]]; then
+				project_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				usage
+				exit 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	if [[ -z "$project_type" ]] || [[ -z "$project_name" ]]; then
+		log_error "Missing required arguments"
+		usage
+		exit 1
+	fi
+
+	local valid_types=("python" "rust" "shell" "cpp" "js")
+	if [[ ! ${valid_types[*]} =~ (^| )"${project_type}"( |$) ]]; then
+		log_error "Invalid type: ${project_type}"
+		log_error "Valid types: ${valid_types[*]}"
+		exit 1
+	fi
+
+	if [[ ! "$project_name" =~ ^([a-zA-Z0-9_/-]+)$ ]]; then
+		log_error "Invalid project name: ${project_name}"
+		exit 1
+	fi
+
+	local project_path="${SPM_DIR}/${project_name}"
+	local template_path="${SPM_TEMPLATES}/${project_type}"
+
+	if [[ -d "$project_path" ]]; then
+		log_error "Project already exists: ${project_path}"
+		exit 1
+	fi
+
+	log_info "Creating project: ${project_name}"
+	log_info "Type: ${project_type}"
+	log_info "Path: ${project_path}"
+
+	if [[ "$dry_run" == true ]]; then
+		log_warn "[DRY RUN] Would create: ${project_path}"
+		log_warn "[DRY RUN] Would copy template from: ${template_path}"
+		log_warn "[DRY RUN] Would register in: ${SPM_REGISTRY}"
+		return 0
+	fi
+
+	log_info "Creating directory..."
+	mkdir -p "${project_path}"
+
+	log_info "Copying template..."
+	cp -r "${template_path}/." "${project_path}/"
+
+	log_info "Initializing git..."
+	git init -q "${project_path}"
+
+	log_info "Installing lefthook..."
+	if command -v lefthook &>/dev/null; then
+		(cd "${project_path}" && lefthook install -f)
+	else
+		log_warn "lefthook not found, skipping"
+	fi
+
+	register_project "${project_path}" "${project_type}"
+
+	log_success "Project created: ${project_path}"
+}
+
+cmd_ls() {
+	if [[ ! -s "${SPM_REGISTRY}" ]]; then
+		log_error "No projects registered"
+		exit 1
+	fi
+
+	local selected
+	selected=$(awk -F'\t' '{print $1}' "${SPM_REGISTRY}" | fzf --prompt="Select project: ")
+
+	if [[ -n "$selected" ]]; then
+		echo "$selected"
+	fi
+}
+
+cmd_info() {
+	local current_dir
+	current_dir="$(pwd)"
+
+	if [[ ! -f "${SPM_REGISTRY}" ]]; then
+		log_error "Not in a registered project"
+		exit 1
+	fi
+
+	local project_info
+	project_info=$(grep "^${current_dir}" "${SPM_REGISTRY}")
+
+	if [[ -z "$project_info" ]]; then
+		log_error "Current directory is not a registered project"
+		exit 1
+	fi
+
+	local path type timestamp
+	path=$(echo "$project_info" | cut -f1)
+	type=$(echo "$project_info" | cut -f2)
+	timestamp=$(echo "$project_info" | cut -f3)
+
+	echo "Project: ${path}"
+	echo "Type: ${type}"
+	echo "Created: ${timestamp}"
+}
+
+cmd_archive() {
+	local current_dir
+	current_dir="$(pwd)"
+
+	local project_info
+	project_info=$(grep "^${current_dir}" "${SPM_REGISTRY}")
+
+	if [[ -z "$project_info" ]]; then
+		log_error "Current directory is not a registered project"
+		exit 1
+	fi
+
+	local archive_dir="${SPM_DIR}/archive"
+	mkdir -p "${archive_dir}"
+
+	local project_name
+	project_name=$(basename "${current_dir}")
+
+	log_info "Archiving to: ${archive_dir}/${project_name}"
+	mv "${current_dir}" "${archive_dir}/"
+
+	sed -i '' "\|^${current_dir}|d" "${SPM_REGISTRY}"
+
+	log_success "Project archived"
+}
+
+main() {
+	check_dependencies
+	init_registry
+
+	if [[ $# -eq 0 ]]; then
+		usage
+		exit 1
+	fi
+
+	local command="$1"
+	shift
+
+	case "$command" in
+	new)
+		cmd_new "$@"
+		;;
+	ls)
+		cmd_ls "$@"
+		;;
+	info)
+		cmd_info "$@"
+		;;
+	archive)
+		cmd_archive "$@"
+		;;
+	help | --help | -h)
+		usage
+		;;
+	*)
+		log_error "Unknown command: ${command}"
+		usage
+		exit 1
+		;;
+	esac
+}
+
+main "$@"
