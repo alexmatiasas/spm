@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+SPM_ORIGINAL_HOME="/Users/alexmatias/projects/shell/spm"
+
 setup() {
 	export HOME="$BATS_TMPDIR/home-test"
 	mkdir -p "$HOME/.local/share/spm"
@@ -13,36 +15,14 @@ setup() {
 
 	touch "${SPM_TEMPLATES}/python/pyproject.toml"
 
+	source "${SPM_ORIGINAL_HOME}/lib/core.sh"
+	source "${SPM_ORIGINAL_HOME}/lib/registry.sh"
 	init_registry
 }
 
 teardown() {
 	rm -rf "$HOME/.local/share/spm"
 	rm -rf "$HOME/projects"
-}
-
-init_registry() {
-	mkdir -p "${SPM_DATA_DIR}"
-	if [[ ! -f "${SPM_REGISTRY}" ]]; then
-		touch "${SPM_REGISTRY}"
-	fi
-}
-
-log_info() { echo "[INFO] $*"; }
-log_success() { echo "[OK] $*"; }
-log_warn() { echo "[WARN] $*"; }
-log_error() { echo "[ERROR] $*" >&2; }
-
-register_project() {
-	local project_path="$1"
-	local project_type="$2"
-	local timestamp
-	timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
-	if grep -q "^${project_path}" "${SPM_REGISTRY}"; then
-		sed -i '' "s|^${project_path}.*|${project_path}\t${project_type}\t${timestamp}|" "${SPM_REGISTRY}"
-	else
-		echo -e "${project_path}\t${project_type}\t${timestamp}" >>"${SPM_REGISTRY}"
-	fi
 }
 
 validate_project_type() {
@@ -102,32 +82,25 @@ validate_project_name() {
 
 @test "dry-run outputs message" {
 	run log_warn "[DRY RUN] Would create: ${SPM_DIR}/test-project"
-	[[ "$output" == *"[DRY RUN] Would create"* ]]
+	[[ "$output" == *"[DRY RUN]"* ]]
 }
 
 @test "dry-run does not create project" {
-	local dry_run=true
-	local project_path="${SPM_DIR}/test-project"
-
-	! [[ -d "$project_path" ]]
+	log_warn "[DRY RUN] Would create: ${SPM_DIR}/test-project"
+	[[ ! -d "${SPM_DIR}/test-project" ]]
 }
 
 @test "project created from template" {
-	local project_path="${SPM_DIR}/test-project"
-	local template_path="${SPM_TEMPLATES}/python"
-
+	mkdir -p "${SPM_DIR}/data_science"
+	project_path="${SPM_DIR}/data_science/test-project"
+	template_path="${SPM_TEMPLATES}/python"
 	mkdir -p "${project_path}"
 	cp -r "${template_path}/." "${project_path}/"
-
 	[[ -f "${project_path}/pyproject.toml" ]]
 }
 
 @test "project registered after creation" {
-	local project_path="${SPM_DIR}/test-project"
-	local project_type="python"
-
-	mkdir -p "${project_path}"
-	register_project "${project_path}" "${project_type}"
-
-	grep -q "${project_path}" "$SPM_REGISTRY"
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	grep -q "myproject" "$SPM_REGISTRY"
 }

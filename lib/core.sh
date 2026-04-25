@@ -51,13 +51,17 @@ Usage: spm <command> [options]
 
 Commands:
     new <type> <name>     Create a new project
-    ls                    List all projects (with fzf)
+    ls [-a]               List projects (with fzf)
     info                  Show info about current project
-    archive               Archive current project
+    archive              Archive current project
+    sync                  Sync registry with filesystem
+    import <path> [-t]    Import existing project
+    scan [path] [-d]      Scan and import projects
     help                  Show this help
 
 Options:
     -d, --dry-run         Show what would be done without doing it
+    -a, --all             Show all projects (including deleted)
     -h, --help            Show this help
 
 Types for 'new':
@@ -66,6 +70,8 @@ Types for 'new':
 Examples:
     spm new python data_science/my-project
     spm ls
+    spm import ~/projects/my-existing-project
+    spm scan ~/projects/shell
     spm info
 
 EOF
