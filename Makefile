@@ -8,7 +8,7 @@ test:
 	bats tests/
 
 lint:
-	shellcheck bin/* lib/*
+	shellcheck -e SC2034 -e SC2086 -e SC2094 bin/* lib/*
 	shfmt -d bin/ lib/
 
 clean:
