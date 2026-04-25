@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+SPM_ORIGINAL_HOME="/Users/alexmatias/projects/shell/spm"
+
 setup() {
 	export HOME="$BATS_TMPDIR/home-test"
 	mkdir -p "$HOME/.local/share/spm"
@@ -8,8 +10,10 @@ setup() {
 	SPM_DIR="${HOME}/projects"
 	SPM_DATA_DIR="${HOME}/.local/share/spm"
 	SPM_REGISTRY="${SPM_DATA_DIR}/registry"
-	SPM_TEMPLATES="${HOME}/projects/shell/spm/templates"
+	SPM_TEMPLATES="${SPM_ORIGINAL_HOME}/templates"
 
+	source "${SPM_ORIGINAL_HOME}/lib/core.sh"
+	source "${SPM_ORIGINAL_HOME}/lib/registry.sh"
 	init_registry
 }
 
@@ -18,40 +22,31 @@ teardown() {
 	rm -rf "$HOME/projects"
 }
 
-init_registry() {
-	mkdir -p "${SPM_DATA_DIR}"
-	if [[ ! -f "${SPM_REGISTRY}" ]]; then
-		touch "${SPM_REGISTRY}"
-	fi
-}
-
-register_project() {
-	local project_path="$1"
-	local project_type="$2"
-	local timestamp
-	timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
-	if grep -q "^${project_path}" "${SPM_REGISTRY}"; then
-		sed -i '' "s|^${project_path}.*|${project_path}\t${project_type}\t${timestamp}|" "${SPM_REGISTRY}"
-	else
-		echo -e "${project_path}\t${project_type}\t${timestamp}" >>"${SPM_REGISTRY}"
-	fi
-}
-
-list_projects() {
-	awk -F'\t' '{print $1}' "${SPM_REGISTRY}"
-}
-
 @test "ls fails when no projects registered" {
 	rm -f "${SPM_REGISTRY}"
 	! list_projects
 }
 
-@test "ls returns projects when registered" {
-	register_project "/tmp/project1" "python"
-	register_project "/tmp/project2" "rust"
+@test "ls returns only active projects by default" {
+	mkdir -p "/tmp/alpha"
+	mkdir -p "/tmp/beta"
+	register_project "/tmp/alpha" "python"
+	register_project "/tmp/beta" "rust"
+	set_project_deleted "beta"
 	result=$(list_projects)
-	[[ "$result" == *"/tmp/project1"* ]]
-	[[ "$result" == *"/tmp/project2"* ]]
+	[[ "$result" == *"alpha"* ]]
+	[[ "$result" != *"beta"* ]]
+}
+
+@test "ls -a returns all projects including deleted" {
+	mkdir -p "/tmp/alpha"
+	mkdir -p "/tmp/beta"
+	register_project "/tmp/alpha" "python"
+	register_project "/tmp/beta" "rust"
+	set_project_deleted "beta"
+	result=$(list_projects -a)
+	[[ "$result" == *"alpha"* ]]
+	[[ "$result" == *"beta"* ]]
 }
 
 @test "ls returns empty when registry empty" {
