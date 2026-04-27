@@ -8,6 +8,7 @@ source "${LIB_DIR}/core.sh"
 source "${LIB_DIR}/registry.sh"
 source "${LIB_DIR}/detect.sh"
 source "${LIB_DIR}/validate.sh"
+source "${LIB_DIR}/sync.sh"
 
 cmd_new() {
 	local project_type=""
@@ -175,8 +176,19 @@ cmd_import() {
 		if [[ -n "$existing" ]]; then
 			sed -i '' "${existing}d" "${SPM_REGISTRY}"
 		fi
-		register_project "$project_path" "$project_type"
+
+		local repo_url
+		repo_url=$(git -C "$project_path" config --get remote.origin.url 2>/dev/null) || true
+
+		register_project "$project_path" "$project_type" "$repo_url"
 		log_success "Imported: ${project_path} (${project_type})"
+
+		echo -n "cd to project? [y/n]: "
+		read -r answer
+		if [[ "$answer" =~ ^[Yy]$ ]]; then
+			cd "$project_path"
+			log_info "Changed to: $(pwd)"
+		fi
 	fi
 }
 
@@ -184,6 +196,7 @@ cmd_scan() {
 	local base_path=""
 	local dry_run=false
 	local force=false
+	local interactive=false
 
 	local exclude_dirs="Icon Credenciales notes Planning Resources Videos Assets"
 
@@ -195,6 +208,10 @@ cmd_scan() {
 			;;
 		-f | --force)
 			force=true
+			shift
+			;;
+		-i | --interactive)
+			interactive=true
 			shift
 			;;
 		-h | --help)
@@ -261,8 +278,20 @@ cmd_scan() {
 		if [[ "$dry_run" == true ]]; then
 			log_info "Would import: $project_name ($project_type)"
 		else
-			register_project "$project_dir" "$project_type"
+			local repo_url
+			repo_url=$(git -C "$project_dir" config --get remote.origin.url 2>/dev/null) || true
+
+			register_project "$project_dir" "$project_type" "$repo_url"
 			log_info "Imported: $project_name ($project_type)"
+
+			if [[ "$interactive" == true ]]; then
+				echo -n "cd to project '$project_name'? [y/n]: "
+				read -r answer
+				if [[ "$answer" =~ ^[Yy]$ ]]; then
+					cd "$project_dir"
+					log_info "Changed to: $(pwd)"
+				fi
+			fi
 		fi
 		((imported++))
 	done < <(find "$base_path" -maxdepth 1 -type d | tail -n +2 | while read -r d; do printf '%s\n' "$(cd "$d" && pwd)"; done)
@@ -422,6 +451,31 @@ cmd_archive() {
 }
 
 cmd_sync() {
+	local dry_run=false
+	local interactive=false
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-d | --dry-run)
+			dry_run=true
+			shift
+			;;
+		-i | --interactive)
+			interactive=true
+			shift
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		*)
+			log_error "Unknown option: $1"
+			usage
+			exit 1
+			;;
+		esac
+	done
+
 	log_info "Syncing registry with filesystem..."
 
 	if [[ ! -s "${SPM_REGISTRY}" ]]; then
@@ -429,37 +483,23 @@ cmd_sync() {
 		exit 1
 	fi
 
-	local count=0
-	local deleted=0
-	local active=0
+	local base_path="${HOME}/projects"
+	local result
+	result=$(sync_directory "$base_path" "$dry_run" "$interactive")
 
-	while IFS='|' read -r id name type date status path last_access repo_url config || [[ -n "$id" ]]; do
-		[[ -z "$id" ]] && continue
-		[[ "$id" == "ID" ]] && continue
-		[[ "$id" == "--" ]] && continue
+	eval "$result"
 
-		((count++))
+	local summary=""
+	[[ $new -gt 0 ]] && summary+="$new new, "
+	[[ $deleted -gt 0 ]] && summary+="$deleted deleted, "
+	[[ $moved -gt 0 ]] && summary+="$moved moved, "
+	summary+="$unchanged unchanged"
 
-		if [[ -d "$path" ]]; then
-			if [[ "$status" != "active" ]]; then
-				local timestamp
-				timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
-				sed -i '' "s#^${id}|${name}|${type}|.*|${status}|${path}|.*#${id}|${name}|${type}|${timestamp}|active|${path}|...||#" "${SPM_REGISTRY}"
-				log_info "Restored: ${name} (was ${status})"
-				((active++))
-			else
-				((active++))
-			fi
-		else
-			if [[ "$status" == "active" ]]; then
-				set_project_deleted "$name"
-				log_info "Marked deleted: ${name}"
-				((deleted++))
-			fi
-		fi
-	done <"${SPM_REGISTRY}"
+	if [[ "$dry_run" == true ]]; then
+		log_warn "Dry run - no changes made"
+	fi
 
-	log_success "Sync complete: ${count} projects checked, ${deleted} deleted, ${active} active"
+	log_success "Sync complete: ${summary}"
 }
 
 main() {
