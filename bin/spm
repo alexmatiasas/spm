@@ -6,6 +6,8 @@ LIB_DIR="${HOME}/projects/shell/spm/lib"
 
 source "${LIB_DIR}/core.sh"
 source "${LIB_DIR}/registry.sh"
+source "${LIB_DIR}/detect.sh"
+source "${LIB_DIR}/validate.sh"
 
 cmd_new() {
 	local project_type=""
@@ -48,14 +50,13 @@ cmd_new() {
 		exit 1
 	fi
 
-	local valid_types=("python" "rust" "shell" "cpp" "js")
-	if [[ ! ${valid_types[*]} =~ (^| )"${project_type}"( |$) ]]; then
+	if ! validate_project_type "$project_type"; then
 		log_error "Invalid type: ${project_type}"
-		log_error "Valid types: ${valid_types[*]}"
+		log_error "Valid types: ${VALID_PROJECT_TYPES[*]}"
 		exit 1
 	fi
 
-	if [[ ! "$project_name" =~ ^([a-zA-Z0-9_/-]+)$ ]]; then
+	if ! validate_project_name "$project_name"; then
 		log_error "Invalid project name: ${project_name}"
 		exit 1
 	fi
@@ -179,43 +180,6 @@ cmd_import() {
 	fi
 }
 
-detect_project_type() {
-	local project_path="$1"
-
-	if [[ -f "${project_path}/Cargo.toml" ]]; then
-		echo "rust"
-	elif [[ -f "${project_path}/pyproject.toml" ]] || [[ -f "${project_path}/requirements.txt" ]] || [[ -f "${project_path}/setup.py" ]]; then
-		echo "python"
-	elif [[ -f "${project_path}/package.json" ]]; then
-		echo "js"
-	elif [[ -f "${project_path}/CMakeLists.txt" ]] || [[ -d "${project_path}/src" && -f "${project_path}/src/main.cpp" ]]; then
-		echo "cpp"
-	elif [[ -d "${project_path}/.git" ]] || [[ -f "${project_path}/main.sh" ]]; then
-		echo "shell"
-	fi
-}
-
-usage_import() {
-	cat <<EOF
-Usage: spm import <path> [-t type] [-d]
-
-Import an existing project into the registry.
-
-Arguments:
-    path                  Project directory path (or . for current dir)
-
-Options:
-    -t, --type <type>   Project type (python, rust, shell, cpp, js)
-    -d, --dry-run       Show what would be imported
-    -h, --help         Show this help
-
-Examples:
-    spm import ~/projects/my-project
-    spm import . -t python
-    spm import ~/projects/my-project -d
-EOF
-}
-
 cmd_scan() {
 	local base_path=""
 	local dry_run=false
@@ -324,11 +288,6 @@ Examples:
     spm scan
     spm scan ~/projects/shell -d  # dry-run
 EOF
-}
-
-find_line() {
-	local query="$1"
-	grep "|${query}|" "${SPM_REGISTRY}" | grep -v "^|" | head -1
 }
 
 cmd_ls() {
@@ -472,34 +431,32 @@ cmd_sync() {
 
 	local count=0
 	local deleted=0
-	local moved=0
 	local active=0
 
-	while IFS=$'\t' read -r path type timestamp status; do
-		if [[ -z "$path" ]]; then
-			continue
-		fi
+	while IFS='|' read -r id name type date status path last_access repo_url config || [[ -n "$id" ]]; do
+		[[ -z "$id" ]] && continue
+		[[ "$id" == "ID" ]] && continue
+		[[ "$id" == "--" ]] && continue
+
+		((count++))
 
 		if [[ -d "$path" ]]; then
 			if [[ "$status" != "active" ]]; then
 				local timestamp
 				timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
-				sed -i '' "s|^${path}\t.*|${path}\t${type}\t${timestamp}\tactive|" "${SPM_REGISTRY}"
-				log_info "Restored: ${path} (was ${status})"
+				sed -i '' "s#^${id}|${name}|${type}|.*|${status}|${path}|.*#${id}|${name}|${type}|${timestamp}|active|${path}|...||#" "${SPM_REGISTRY}"
+				log_info "Restored: ${name} (was ${status})"
 				((active++))
 			else
 				((active++))
 			fi
 		else
 			if [[ "$status" == "active" ]]; then
-				set_project_deleted "$path"
-				log_info "Marked deleted: ${path}"
+				set_project_deleted "$name"
+				log_info "Marked deleted: ${name}"
 				((deleted++))
-			else
-				:
 			fi
 		fi
-		((count++))
 	done <"${SPM_REGISTRY}"
 
 	log_success "Sync complete: ${count} projects checked, ${deleted} deleted, ${active} active"
