@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2154
-set -euo pipefail
+set -uo pipefail
 
 LIB_DIR="${HOME}/projects/shell/spm/lib"
 
@@ -8,6 +8,7 @@ source "${LIB_DIR}/core.sh"
 source "${LIB_DIR}/registry.sh"
 source "${LIB_DIR}/detect.sh"
 source "${LIB_DIR}/validate.sh"
+source "${LIB_DIR}/scan.sh"
 source "${LIB_DIR}/sync.sh"
 
 cmd_new() {
@@ -142,7 +143,7 @@ cmd_import() {
 	if [[ "$project_path" == "." ]]; then
 		project_path="$(pwd)"
 	elif [[ "$project_path" != /* ]]; then
-		project_path="$(cd "$project_path" && pwd)"
+		project_path="$(cd "$project_path" || exit 1 && pwd)"
 	fi
 
 	if [[ ! -d "$project_path" ]]; then
@@ -186,7 +187,7 @@ cmd_import() {
 		echo -n "cd to project? [y/n]: "
 		read -r answer
 		if [[ "$answer" =~ ^[Yy]$ ]]; then
-			cd "$project_path"
+			cd "$project_path" || exit 1
 			log_info "Changed to: $(pwd)"
 		fi
 	fi
@@ -288,7 +289,7 @@ cmd_scan() {
 				echo -n "cd to project '$project_name'? [y/n]: "
 				read -r answer
 				if [[ "$answer" =~ ^[Yy]$ ]]; then
-					cd "$project_dir"
+					cd "$project_dir" || exit 1
 					log_info "Changed to: $(pwd)"
 				fi
 			fi
@@ -484,22 +485,84 @@ cmd_sync() {
 	fi
 
 	local base_path="${HOME}/projects"
-	local result
-	result=$(sync_directory "$base_path" "$dry_run" "$interactive")
 
-	eval "$result"
+	local new_count=0
+	local deleted_count=0
+	local moved_count=0
+	local unchanged=0
 
-	local summary=""
-	[[ $new -gt 0 ]] && summary+="$new new, "
-	[[ $deleted -gt 0 ]] && summary+="$deleted deleted, "
-	[[ $moved -gt 0 ]] && summary+="$moved moved, "
-	summary+="$unchanged unchanged"
+	while IFS='|' read -r id name type date status stored_path last_access repo_url config || [[ -n "$id" ]]; do
+		[[ -z "$id" ]] && continue
+		[[ "$id" == "ID" ]] && continue
+		[[ "$id" == "--" ]] && continue
+		[[ "$status" != "active" ]] && continue
+
+		if [[ ! -d "$stored_path" ]]; then
+			if [[ "$interactive" == true ]]; then
+				log_warn "Project not found: $name at $stored_path"
+				printf "Archive '%s'? [y/n]: " "$name"
+				read -r answer
+				if [[ "$answer" =~ ^[Yy]$ ]]; then
+					set_project_deleted "$name"
+					((deleted_count++))
+					log_info "Archived: $name"
+				fi
+			else
+				set_project_deleted "$name"
+				((deleted_count++))
+				log_info "Marked deleted: $name"
+			fi
+		else
+			((unchanged++))
+		fi
+	done <"${SPM_REGISTRY}"
+
+	if [[ -d "$base_path" ]]; then
+		while IFS= read -r project_dir; do
+			[[ -z "$project_dir" ]] && continue
+			[[ ! -d "$project_dir" ]] && continue
+
+			local dir_name
+			dir_name=$(basename "$project_dir")
+
+			is_excluded_dir "$dir_name" && continue
+
+			local registered
+			registered=$(grep -F "|${dir_name}|" "${SPM_REGISTRY}" | grep '|active|' | cut -d'|' -f2) || true
+
+			if [[ -z "$registered" ]]; then
+				local project_type
+				project_type=$(detect_project_type "$project_dir")
+
+				if [[ -n "$project_type" ]]; then
+					if [[ "$interactive" == true ]]; then
+						log_info "New project: $dir_name ($project_type)"
+						printf "Import '%s'? [y/n]: " "$dir_name"
+						read -r answer
+						if [[ "$answer" =~ ^[Yy]$ ]]; then
+							local repo_url
+							repo_url=$(git -C "$project_dir" config --get remote.origin.url 2>/dev/null) || repo_url=""
+							register_project "$project_dir" "$project_type" "$repo_url"
+							((new_count++))
+						fi
+					else
+						local repo_url
+						repo_url=$(git -C "$project_dir" config --get remote.origin.url 2>/dev/null) || repo_url=""
+						register_project "$project_dir" "$project_type" "$repo_url"
+						((new_count++))
+					fi
+				fi
+			else
+				((unchanged++))
+			fi
+		done < <(find "$base_path" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+	fi
 
 	if [[ "$dry_run" == true ]]; then
 		log_warn "Dry run - no changes made"
 	fi
 
-	log_success "Sync complete: ${summary}"
+	log_success "Sync complete: $new_count new, $deleted_count deleted, $unchanged unchanged"
 }
 
 main() {
