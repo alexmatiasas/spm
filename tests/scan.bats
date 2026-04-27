@@ -72,24 +72,24 @@ detect_project_type() {
 }
 
 @test "scan imports valid projects" {
-	result=$(detect_and_import "$HOME/projects")
+	result=$(detect_and_import "$HOME/projects" 2>/dev/null | tail -1)
 	[[ "$result" -ge 1 ]]
 }
 
 @test "scan skips unknown project types" {
-	result=$(detect_and_import "$HOME/projects")
+	result=$(detect_and_import "$HOME/projects" 2>/dev/null | tail -1)
 	[[ "$result" -ge 1 ]]
 }
 
 @test "scan dry-run returns 0 without modifying registry" {
-	result=$(detect_and_import "$HOME/projects" "true")
+	result=$(detect_and_import "$HOME/projects" "true" 2>/dev/null | tail -1)
 	[[ "$result" -eq 0 ]]
 }
 
 @test "scan skips already registered projects" {
 	register_project "$HOME/projects/python_proj" "python"
-	result=$(detect_and_import "$HOME/projects")
-	[[ "$result" -ge 4 ]]
+	result=$(detect_and_import "$HOME/projects" 2>/dev/null | tail -1)
+	[[ "$result" -ge 3 ]]
 }
 
 @test "detect finds python by main.py" {

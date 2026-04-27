@@ -103,8 +103,9 @@ HEADER
 @test "find_line finds by ID" {
 	mkdir -p "/tmp/myproject"
 	register_project "/tmp/myproject" "python"
-	result=$(find_line "001")
-	[[ "$result" == *"myproject"* ]]
+	result=$(grep myproject "$SPM_REGISTRY" | cut -d'|' -f1)
+	found=$(find_line "$result")
+	[[ "$found" == *"myproject"* ]]
 }
 
 @test "find_line finds by name" {

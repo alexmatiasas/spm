@@ -208,17 +208,15 @@ set_project_moved() {
 	local new_path="$2"
 	local old_name
 	old_name=$(basename "$project_path")
-	local new_name
-	new_name=$(basename "$new_path")
 	local line
 	line=$(find_line "$old_name")
 	[[ -z "$line" ]] && return 1
 
-	local id type
+	local id type new_name timestamp
 	id=$(echo "$line" | cut -d'|' -f1)
 	type=$(echo "$line" | cut -d'|' -f3)
-	local timestamp
+	new_name=$(basename "$new_path")
 	timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
 
-	sed -i '' "s#${id}|${old_name}|${type}|.*|active|${project_path}|.*#${id}|${new_name}|${type}|${timestamp}|moved|${new_path}|.*|" "${SPM_REGISTRY}"
+	sed -i '' "s#${id}|${old_name}|${type}|.*#${id}|${new_name}|${type}|${timestamp}|moved|${new_path}||#" "${SPM_REGISTRY}"
 }
