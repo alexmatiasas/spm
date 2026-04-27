@@ -36,13 +36,6 @@ check_dependencies() {
 	fi
 }
 
-init_registry() {
-	mkdir -p "${SPM_DATA_DIR}"
-	if [[ ! -f "${SPM_REGISTRY}" ]]; then
-		touch "${SPM_REGISTRY}"
-	fi
-}
-
 usage() {
 	cat <<EOF
 spm v${SPM_VERSION} - Smart Project Manager
