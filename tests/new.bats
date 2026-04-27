@@ -17,27 +17,13 @@ setup() {
 
 	source "${SPM_ORIGINAL_HOME}/lib/core.sh"
 	source "${SPM_ORIGINAL_HOME}/lib/registry.sh"
+	source "${SPM_ORIGINAL_HOME}/lib/validate.sh"
 	init_registry
 }
 
 teardown() {
 	rm -rf "$HOME/.local/share/spm"
 	rm -rf "$HOME/projects"
-}
-
-validate_project_type() {
-	local project_type="$1"
-	local valid_types=("python" "rust" "shell" "cpp" "js")
-	if [[ ! ${valid_types[*]} =~ (^| )"${project_type}"( |$) ]]; then
-		return 1
-	fi
-}
-
-validate_project_name() {
-	local project_name="$1"
-	if [[ ! "$project_name" =~ ^([a-zA-Z0-9_/-]+)$ ]]; then
-		return 1
-	fi
 }
 
 @test "validate_project_type accepts python" {

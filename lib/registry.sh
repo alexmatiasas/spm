@@ -20,6 +20,7 @@ generate_uuid() {
 register_project() {
 	local project_path="$1"
 	local project_type="$2"
+	local repo_url="${3:-}"
 	local timestamp
 	timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
 
@@ -32,9 +33,9 @@ register_project() {
 	if grep -q "|${project_name}|" "${SPM_REGISTRY}"; then
 		log_warn "Project already exists: ${project_name}"
 		return 1
-	fi
+	fi || return 0
 
-	local new_line="${new_id}|${project_name}|${project_type}|${timestamp}|active|${project_path}|||"
+	local new_line="${new_id}|${project_name}|${project_type}|${timestamp}|active|${project_path}|${repo_url}||"
 
 	if [[ -s "${SPM_REGISTRY}" ]]; then
 		local last_char
@@ -114,6 +115,30 @@ get_project_type() {
 	echo "$line" | cut -d'|' -f3
 }
 
+get_project_last_access() {
+	local id_or_name="$1"
+	local line
+	line=$(find_line "$id_or_name")
+	[[ -z "$line" ]] && return 1
+	echo "$line" | cut -d'|' -f7
+}
+
+get_project_repo_url() {
+	local id_or_name="$1"
+	local line
+	line=$(find_line "$id_or_name")
+	[[ -z "$line" ]] && return 1
+	echo "$line" | cut -d'|' -f8
+}
+
+get_project_config() {
+	local id_or_name="$1"
+	local line
+	line=$(find_line "$id_or_name")
+	[[ -z "$line" ]] && return 1
+	echo "$line" | cut -d'|' -f9
+}
+
 update_last_access() {
 	local id_or_name="$1"
 	local line
@@ -139,17 +164,22 @@ update_repo_url() {
 	line=$(find_line "$id_or_name")
 	[[ -z "$line" ]] && return 1
 
-	local id name path
+	local id name
 	id=$(echo "$line" | cut -d'|' -f1)
 	name=$(echo "$line" | cut -d'|' -f2)
-	path=$(echo "$line" | cut -d'|' -f6)
 
-	sed -i '' "s#${id}|${name}|.*|${path}|.*#${id}|${name}|.*|${path}||${repo_url}|#" "${SPM_REGISTRY}"
+	awk -F'|' -v id="$id" -v name="$name" -v url="$repo_url" \
+		'BEGIN { FS="|"; OFS="|" } $1 == id && $2 == name { $8 = url } 1' \
+		"${SPM_REGISTRY}" >"${SPM_REGISTRY}.tmp" && mv "${SPM_REGISTRY}.tmp" "${SPM_REGISTRY}"
 }
 
 get_git_remote() {
 	local project_path="$1"
-	cd "$project_path" && git config --get remote.origin.url 2>/dev/null
+	if [[ -d "${project_path}/.git" ]]; then
+		git -C "$project_path" config --get remote.origin.url 2>/dev/null || echo ""
+	else
+		echo ""
+	fi
 }
 
 list_projects() {
@@ -201,6 +231,22 @@ set_project_deleted() {
 	timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
 
 	sed -i '' "s#${id}|${name}|${type}|.*|active|${path}|.*#${id}|${name}|${type}|${timestamp}|deleted|${path}||#" "${SPM_REGISTRY}"
+}
+
+set_project_name() {
+	local id_or_name="$1"
+	local new_name="$2"
+	local line
+	line=$(find_line "$id_or_name")
+	[[ -z "$line" ]] && return 1
+
+	local id type path timestamp
+	id=$(echo "$line" | cut -d'|' -f1)
+	type=$(echo "$line" | cut -d'|' -f3)
+	path=$(echo "$line" | cut -d'|' -f6)
+	timestamp=$(date +"%Y-%m-%dT%H:%M:%S")
+
+	sed -i '' "s#^${id}|.*|${type}|.*#${id}|${new_name}|${type}|${timestamp}#1" "${SPM_REGISTRY}"
 }
 
 set_project_moved() {
