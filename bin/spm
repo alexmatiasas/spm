@@ -338,9 +338,10 @@ cmd_ls() {
 	fi
 
 	local valid_projects=()
-	while IFS='|' read -r id name type date status; do
+	while IFS='|' read -r id name type date status path last_access repo_url config; do
 		[[ -z "$id" ]] && continue
 		[[ "$id" == "ID" ]] && continue
+		[[ "$id" == "--" ]] && continue
 		[[ "$status" != "active" ]] && continue
 		valid_projects+=("$name")
 	done <"${SPM_REGISTRY}"
@@ -353,7 +354,7 @@ cmd_ls() {
 	local selected
 	selected=$(printf '%s\n' "${valid_projects[@]}" | fzf --prompt="Select project: ") || selected=""
 
-	[[ -n "$selected" ]] && echo "$selected"
+	[[ -n "$selected" ]] && get_project_path "$selected"
 }
 
 cmd_table() {
@@ -370,7 +371,7 @@ cmd_table() {
 
 	log_info "Projects:"
 	echo ""
-	while IFS='|' read -r id name type date status || [[ -n "$id" ]]; do
+	while IFS='|' read -r id name type date status path last_access repo_url config || [[ -n "$id" ]]; do
 		[[ -z "$id" ]] && continue
 		[[ "$id" == "ID" ]] && continue
 		[[ "$id" == "--" ]] && continue
@@ -384,7 +385,7 @@ cmd_table() {
 		*) color="${NC}" ;;
 		esac
 
-		printf "${color}| %3s | %-20s | %-6s | %-19s | %s${NC}\n" "$id" "$name" "$type" "$date" "$status"
+		printf "${color}| %-10s | %-20s | %-6s | %-19s | %s${NC}\n" "$id" "$name" "$type" "$date" "$status"
 	done <"${SPM_REGISTRY}"
 }
 
@@ -408,18 +409,32 @@ cmd_info() {
 		exit 1
 	fi
 
-	local id name type date status
+	local id name type date status path last_access repo_url config
 	id=$(echo "$line" | cut -d'|' -f1)
 	name=$(echo "$line" | cut -d'|' -f2)
 	type=$(echo "$line" | cut -d'|' -f3)
 	date=$(echo "$line" | cut -d'|' -f4)
 	status=$(echo "$line" | cut -d'|' -f5)
+	path=$(echo "$line" | cut -d'|' -f6)
+	last_access=$(echo "$line" | cut -d'|' -f7)
+	repo_url=$(echo "$line" | cut -d'|' -f8)
+	config=$(echo "$line" | cut -d'|' -f9)
+
+	local git_remote
+	if [[ -d "$path/.git" ]]; then
+		git_remote=$(cd "$path" && git config --get remote.origin.url 2>/dev/null)
+		[[ -z "$repo_url" && -n "$git_remote" ]] && repo_url="$git_remote"
+	fi
 
 	echo "ID: ${id}"
 	echo "Name: ${name}"
 	echo "Type: ${type}"
 	echo "Created: ${date}"
 	echo "Status: ${status}"
+	echo "Path: ${path}"
+	[[ -n "$last_access" ]] && echo "Last Access: ${last_access}"
+	[[ -n "$repo_url" ]] && echo "Repo: ${repo_url}"
+	[[ -n "$config" ]] && echo "Config: ${config}"
 }
 
 cmd_archive() {
