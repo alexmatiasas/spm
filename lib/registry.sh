@@ -33,7 +33,7 @@ register_project() {
 	if grep -q "|${project_name}|" "${SPM_REGISTRY}"; then
 		log_warn "Project already exists: ${project_name}"
 		return 1
-	fi
+	fi || return 0
 
 	local new_line="${new_id}|${project_name}|${project_type}|${timestamp}|active|${project_path}|${repo_url}||"
 
