@@ -3,6 +3,7 @@
 SPM_ORIGINAL_HOME="/Users/alexmatias/projects/shell/spm"
 
 setup() {
+	rm -rf "$BATS_TMPDIR/home-test"
 	export HOME="$BATS_TMPDIR/home-test"
 	mkdir -p "$HOME/.local/share/spm"
 	mkdir -p "$HOME/projects"
@@ -24,6 +25,10 @@ setup() {
 
 	mkdir -p "$HOME/projects/unknown_proj"
 
+	mkdir -p "$HOME/projects/Icon"
+	mkdir -p "$HOME/projects/Credenciales"
+	mkdir -p "$HOME/projects/notes"
+
 	SPM_DIR="${HOME}/projects"
 	SPM_DATA_DIR="${HOME}/.local/share/spm"
 	SPM_REGISTRY="${SPM_DATA_DIR}/registry"
@@ -31,12 +36,13 @@ setup() {
 
 	source "${SPM_ORIGINAL_HOME}/lib/core.sh"
 	source "${SPM_ORIGINAL_HOME}/lib/registry.sh"
+	source "${SPM_ORIGINAL_HOME}/lib/detect.sh"
+	source "${SPM_ORIGINAL_HOME}/lib/scan.sh"
 	init_registry
 }
 
 teardown() {
-	rm -rf "$HOME/.local/share/spm"
-	rm -rf "$HOME/projects"
+	rm -rf "$BATS_TMPDIR/home-test"
 }
 
 detect_and_import() {
@@ -55,35 +61,17 @@ detect_and_import() {
 	echo "$count"
 }
 
-detect_project_type() {
-	local project_path="$1"
-
-	if [[ -f "${project_path}/Cargo.toml" ]]; then
-		echo "rust"
-	elif [[ -f "${project_path}/pyproject.toml" ]] || [[ -f "${project_path}/requirements.txt" ]] || [[ -f "${project_path}/setup.py" ]] || [[ -f "${project_path}/main.py" ]]; then
-		echo "python"
-	elif [[ -f "${project_path}/package.json" ]]; then
-		echo "js"
-	elif [[ -f "${project_path}/CMakeLists.txt" ]]; then
-		echo "cpp"
-	elif [[ -d "${project_path}/.git" ]] || [[ -f "${project_path}/main.sh" ]]; then
-		echo "shell"
-	fi
-}
-
 @test "scan imports valid projects" {
 	result=$(detect_and_import "$HOME/projects" 2>/dev/null | tail -1)
 	[[ "$result" -ge 1 ]]
 }
 
-@test "scan skips unknown project types" {
-	result=$(detect_and_import "$HOME/projects" 2>/dev/null | tail -1)
-	[[ "$result" -ge 1 ]]
-}
-
-@test "scan dry-run returns 0 without modifying registry" {
-	result=$(detect_and_import "$HOME/projects" "true" 2>/dev/null | tail -1)
-	[[ "$result" -eq 0 ]]
+@test "scan dry-run does not modify registry" {
+	local before after
+	before=$(cat "$SPM_REGISTRY")
+	detect_and_import "$HOME/projects" "true" 2>/dev/null >/dev/null
+	after=$(cat "$SPM_REGISTRY")
+	[[ "$before" == "$after" ]]
 }
 
 @test "scan skips already registered projects" {
@@ -92,27 +80,29 @@ detect_project_type() {
 	[[ "$result" -ge 3 ]]
 }
 
-@test "detect finds python by main.py" {
-	result=$(detect_project_type "$HOME/projects/python_proj")
-	[[ "$result" == "python" ]]
+@test "is_excluded_dir returns true for Icon" {
+	is_excluded_dir "Icon"
 }
 
-@test "detect finds shell by main.sh" {
-	result=$(detect_project_type "$HOME/projects/shell_proj")
-	[[ "$result" == "shell" ]]
+@test "is_excluded_dir returns true for Credenciales" {
+	is_excluded_dir "Credenciales"
 }
 
-@test "detect finds js by package.json" {
-	result=$(detect_project_type "$HOME/projects/js_proj")
-	[[ "$result" == "js" ]]
+@test "is_excluded_dir returns true for notes" {
+	is_excluded_dir "notes"
 }
 
-@test "detect finds rust by Cargo.toml" {
-	result=$(detect_project_type "$HOME/projects/rust_proj")
-	[[ "$result" == "rust" ]]
+@test "is_excluded_dir returns false for normal dir" {
+	! is_excluded_dir "python_proj"
 }
 
-@test "detect returns empty for unknown" {
-	result=$(detect_project_type "$HOME/projects/unknown_proj")
-	[[ -z "$result" ]]
+@test "scan_directory returns count format" {
+	result=$(scan_directory "$HOME/projects" "false" "false")
+	[[ "$result" == *"imported="* ]]
+	[[ "$result" == *"skipped="* ]]
+}
+
+@test "scan_directory dry-run preserves registry" {
+	scan_directory "$HOME/projects" "true" "false" >/dev/null 2>&1 || true
+	! grep -q "python_proj" "$SPM_REGISTRY"
 }

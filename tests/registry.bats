@@ -20,16 +20,7 @@ setup() {
 teardown() {
 	rm -rf "$HOME/.local/share/spm"
 	rm -rf "$HOME/projects"
-}
-
-init_registry() {
-	mkdir -p "${SPM_DATA_DIR}"
-	if [[ ! -f "${SPM_REGISTRY}" ]]; then
-		cat > "${SPM_REGISTRY}" <<'HEADER'
-ID|Name|Type|Created|Status
---|----|----|------|------
-HEADER
-	fi
+	rm -rf "$HOME/myproject" "$HOME/myproject-nogit" "$HOME/myproject-git"
 }
 
 @test "register_project adds new entry with active status" {
@@ -113,4 +104,72 @@ HEADER
 	register_project "/tmp/myproject" "python"
 	result=$(find_line "myproject")
 	[[ "$result" == *"myproject"* ]]
+}
+
+@test "register_project creates 9-field entry" {
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	field_count=$(awk -F'|' '{print NF}' "${SPM_REGISTRY}" | tail -1)
+	[[ "$field_count" -eq 9 ]]
+}
+
+@test "get_project_last_access returns empty for new project" {
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	result=$(get_project_last_access "myproject")
+	[[ -z "$result" ]]
+}
+
+@test "update_last_access sets timestamp" {
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	update_last_access "myproject"
+	result=$(get_project_last_access "myproject")
+	[[ -n "$result" ]]
+	[[ "$result" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]
+}
+
+@test "get_project_repo_url returns empty for new project" {
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	result=$(get_project_repo_url "myproject")
+	[[ -z "$result" ]]
+}
+
+@test "update_repo_url sets repo URL" {
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	update_repo_url "myproject" "https://github.com/user/repo"
+	result=$(get_project_repo_url "myproject")
+	[[ "$result" == "https://github.com/user/repo" ]]
+}
+
+@test "get_project_config returns empty for new project" {
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	result=$(get_project_config "myproject")
+	[[ -z "$result" ]]
+}
+
+@test "get_git_remote returns empty for non-git dir" {
+	mkdir -p "$HOME/myproject-nogit"
+	result=$(get_git_remote "$HOME/myproject-nogit")
+	[[ -z "$result" ]]
+}
+
+@test "get_git_remote returns remote for git repo" {
+	mkdir -p "$HOME/myproject-git"
+	git init -q "$HOME/myproject-git"
+	git -C "$HOME/myproject-git" config remote.origin.url "git@github.com:user/repo.git"
+	result=$(get_git_remote "$HOME/myproject-git")
+	[[ "$result" == "git@github.com:user/repo.git" ]]
+}
+
+@test "set_project_deleted clears last_access" {
+	mkdir -p "/tmp/myproject"
+	register_project "/tmp/myproject" "python"
+	update_last_access "myproject"
+	set_project_deleted "myproject"
+	result=$(get_project_last_access "myproject")
+	[[ -z "$result" ]]
 }
