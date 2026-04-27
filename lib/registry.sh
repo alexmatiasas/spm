@@ -7,11 +7,14 @@ export LC_ALL=C.UTF-8 2>/dev/null || true
 
 generate_uuid() {
 	local ts random
-	ts=$(date +%s 2>/dev/null || echo "$$")
-	random=$((ts % 1000000))
+	ts=$(date +%s 2>/dev/null)
+	[[ -z "$ts" ]] && ts="$$"
+	random=$(((ts % 1000000) + ($$ % 1000) * 1000))
 	local hash
-	hash=$(printf '%x' $((random + $$ * 17)))
-	printf 'spm-%04x' "$hash"
+	hash=$(printf '%x' "$random" 2>/dev/null)
+	[[ -z "$hash" ]] && hash=$(printf '%x' "$$")
+	hash="${hash:0:4}"
+	printf 'spm-%s' "$hash"
 }
 
 register_project() {
