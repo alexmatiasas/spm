@@ -2,7 +2,7 @@
 # shellcheck disable=SC2154
 # Core utilities: config, logging, helpers
 
-SPM_VERSION="0.1.0"
+SPM_VERSION="0.1.1"
 SPM_DIR="${HOME}/projects"
 SPM_DATA_DIR="${HOME}/.local/share/spm"
 SPM_REGISTRY="${SPM_DATA_DIR}/registry"

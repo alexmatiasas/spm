@@ -1,3 +1,9 @@
+## v0.1.1 (2026-07-15)
+
+### Fix
+
+- **readme**: fix typo in license
+
 ## v0.1.0 (2026-07-15)
 
 ### Feat
