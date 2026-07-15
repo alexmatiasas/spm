@@ -13,3 +13,6 @@
 *.pem
 *.key
 secrets/
+
+# coverage from bats testing suite
+coverage/
