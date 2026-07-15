@@ -153,4 +153,4 @@ make lint
 
 ## License
 
-ISC — see [LICENCE](LICENCE).
+ISC — see [LICENSE](LICENSE).
