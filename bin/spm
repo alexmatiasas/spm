@@ -1,0 +1,616 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2154
+set -uo pipefail
+
+LIB_DIR="${HOME}/projects/shell/spm/lib"
+
+source "${LIB_DIR}/core.sh"
+source "${LIB_DIR}/registry.sh"
+source "${LIB_DIR}/detect.sh"
+source "${LIB_DIR}/validate.sh"
+source "${LIB_DIR}/scan.sh"
+source "${LIB_DIR}/sync.sh"
+
+cmd_new() {
+	local project_type=""
+	local project_name=""
+	local dry_run=false
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-d | --dry-run)
+			dry_run=true
+			shift
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		-*)
+			log_error "Unknown option: $1"
+			usage
+			exit 1
+			;;
+		*)
+			if [[ -z "$project_type" ]]; then
+				project_type="$1"
+			elif [[ -z "$project_name" ]]; then
+				project_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				usage
+				exit 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	if [[ -z "$project_type" ]] || [[ -z "$project_name" ]]; then
+		log_error "Missing required arguments"
+		usage
+		exit 1
+	fi
+
+	if ! validate_project_type "$project_type"; then
+		log_error "Invalid type: ${project_type}"
+		log_error "Valid types: ${VALID_PROJECT_TYPES[*]}"
+		exit 1
+	fi
+
+	if ! validate_project_name "$project_name"; then
+		log_error "Invalid project name: ${project_name}"
+		exit 1
+	fi
+
+	local project_path="${SPM_DIR}/${project_name}"
+	local template_path="${SPM_TEMPLATES}/${project_type}"
+
+	if [[ -d "$project_path" ]]; then
+		log_error "Project already exists: ${project_path}"
+		exit 1
+	fi
+
+	log_info "Creating project: ${project_name}"
+	log_info "Type: ${project_type}"
+	log_info "Path: ${project_path}"
+
+	if [[ "$dry_run" == true ]]; then
+		log_warn "[DRY RUN] Would create: ${project_path}"
+		log_warn "[DRY RUN] Would copy template from: ${template_path}"
+		log_warn "[DRY RUN] Would register in: ${SPM_REGISTRY}"
+		return 0
+	fi
+
+	log_info "Creating directory..."
+	mkdir -p "${project_path}"
+
+	log_info "Copying template..."
+	cp -r "${template_path}/." "${project_path}/"
+
+	log_info "Initializing git..."
+	git init -q "${project_path}"
+
+	log_info "Installing lefthook..."
+	if command -v lefthook &>/dev/null; then
+		(cd "${project_path}" && lefthook install -f)
+	else
+		log_warn "lefthook not found, skipping"
+	fi
+
+	register_project "${project_path}" "${project_type}"
+
+	log_success "Project created: ${project_path}"
+}
+
+cmd_import() {
+	local project_path=""
+	local project_type=""
+	local dry_run=false
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-t | --type)
+			project_type="$2"
+			shift 2
+			;;
+		-d | --dry-run)
+			dry_run=true
+			shift
+			;;
+		-h | --help)
+			usage_import
+			exit 0
+			;;
+		-*)
+			log_error "Unknown option: $1"
+			usage
+			exit 1
+			;;
+		*)
+			project_path="$1"
+			shift
+			;;
+		esac
+	done
+
+	if [[ -z "$project_path" ]]; then
+		log_error "Missing project path"
+		usage_import
+		exit 1
+	fi
+
+	if [[ "$project_path" == "." ]]; then
+		project_path="$(pwd)"
+	elif [[ "$project_path" != /* ]]; then
+		project_path="$(cd "$project_path" || exit 1 && pwd)"
+	fi
+
+	if [[ ! -d "$project_path" ]]; then
+		log_error "Directory does not exist: ${project_path}"
+		exit 1
+	fi
+
+	local project_name
+	project_name=$(basename "$project_path")
+
+	if find_line "$project_name" | grep -q .; then
+		log_warn "Project already registered: ${project_name}"
+	fi
+
+	if [[ -z "$project_type" ]]; then
+		project_type=$(detect_project_type "$project_path")
+	fi
+
+	if [[ -z "$project_type" ]]; then
+		log_error "Could not detect project type"
+		log_info "Please specify type with -t <type>"
+		log_info "Valid types: python, rust, shell, cpp, js"
+		exit 1
+	fi
+
+	if [[ "$dry_run" == true ]]; then
+		log_info "[DRY RUN] Would import: ${project_path} (${project_type})"
+	else
+		local existing
+		existing=$(grep -n "^${project_path}" "${SPM_REGISTRY}" | cut -f1)
+		if [[ -n "$existing" ]]; then
+			sed -i '' "${existing}d" "${SPM_REGISTRY}"
+		fi
+
+		local repo_url
+		repo_url=$(git -C "$project_path" config --get remote.origin.url 2>/dev/null) || true
+
+		register_project "$project_path" "$project_type" "$repo_url"
+		log_success "Imported: ${project_path} (${project_type})"
+
+		echo -n "cd to project? [y/n]: "
+		read -r answer
+		if [[ "$answer" =~ ^[Yy]$ ]]; then
+			cd "$project_path" || exit 1
+			log_info "Changed to: $(pwd)"
+		fi
+	fi
+}
+
+cmd_scan() {
+	local base_path=""
+	local dry_run=false
+	local force=false
+	local interactive=false
+
+	local exclude_dirs="Icon Credenciales notes Planning Resources Videos Assets"
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-d | --dry-run)
+			dry_run=true
+			shift
+			;;
+		-f | --force)
+			force=true
+			shift
+			;;
+		-i | --interactive)
+			interactive=true
+			shift
+			;;
+		-h | --help)
+			usage_scan
+			exit 0
+			;;
+		*)
+			base_path="$1"
+			shift
+			;;
+		esac
+	done
+
+	if [[ -z "$base_path" ]]; then
+		base_path="${SPM_DIR}"
+	elif [[ "$base_path" == "~" ]]; then
+		base_path="${HOME}"
+	elif [[ "$base_path" == "." ]]; then
+		base_path="$(pwd)"
+	elif [[ "$base_path" != /* ]]; then
+		base_path="$(cd "$base_path" && pwd)"
+	fi
+
+	if [[ ! -d "$base_path" ]]; then
+		log_error "Directory does not exist: ${base_path}"
+		exit 1
+	fi
+
+	log_info "Scanning: ${base_path}"
+
+	local imported=0
+	local skipped=0
+
+	while IFS= read -r project_dir; do
+		[[ -z "$project_dir" ]] && continue
+		[[ ! -d "$project_dir" ]] && continue
+
+		local project_name
+		project_name=$(basename "$project_dir")
+
+		if [[ " $exclude_dirs " == *" $project_name "* ]]; then
+			((skipped++))
+			continue
+		fi
+
+		if grep -q "^${project_dir}" "${SPM_REGISTRY}"; then
+			((skipped++))
+			continue
+		fi
+
+		local project_type
+		project_type=$(detect_project_type "$project_dir")
+
+		if [[ -z "$project_type" ]]; then
+			((skipped++))
+			continue
+		fi
+
+		if find_line "$project_name" | grep -q .; then
+			((skipped++))
+			continue
+		fi
+
+		if [[ "$dry_run" == true ]]; then
+			log_info "Would import: $project_name ($project_type)"
+		else
+			local repo_url
+			repo_url=$(git -C "$project_dir" config --get remote.origin.url 2>/dev/null) || true
+
+			register_project "$project_dir" "$project_type" "$repo_url"
+			log_info "Imported: $project_name ($project_type)"
+
+			if [[ "$interactive" == true ]]; then
+				echo -n "cd to project '$project_name'? [y/n]: "
+				read -r answer
+				if [[ "$answer" =~ ^[Yy]$ ]]; then
+					cd "$project_dir" || exit 1
+					log_info "Changed to: $(pwd)"
+				fi
+			fi
+		fi
+		((imported++))
+	done < <(find "$base_path" -maxdepth 1 -type d | tail -n +2 | while read -r d; do printf '%s\n' "$(cd "$d" && pwd)"; done)
+
+	log_success "Scan complete: $imported imported, $skipped skipped"
+}
+
+usage_scan() {
+	cat <<EOF
+Usage: spm scan [path] [options]
+
+Scan immediate subdirectories and import them.
+
+Arguments:
+    path                  Directory to scan (default: SPM_DIR/projects)
+
+Options:
+    -d, --dry-run        Show what would be imported without importing
+    -f, --force         Re-import already registered projects
+    -h, --help         Show this help
+
+Examples:
+    spm scan
+    spm scan ~/projects/shell -d  # dry-run
+EOF
+}
+
+cmd_ls() {
+	if [[ ! -s "${SPM_REGISTRY}" ]]; then
+		log_error "No projects registered"
+		exit 1
+	fi
+
+	local valid_projects=()
+	while IFS='|' read -r id name type date status path last_access repo_url config; do
+		[[ -z "$id" ]] && continue
+		[[ "$id" == "ID" ]] && continue
+		[[ "$id" == "--" ]] && continue
+		[[ "$status" != "active" ]] && continue
+		valid_projects+=("$name")
+	done <"${SPM_REGISTRY}"
+
+	if [[ ${#valid_projects[@]} -eq 0 ]]; then
+		log_error "No active projects found"
+		exit 1
+	fi
+
+	local selected
+	selected=$(printf '%s\n' "${valid_projects[@]}" | fzf --prompt="Select project: ") || selected=""
+
+	[[ -n "$selected" ]] && get_project_path "$selected"
+}
+
+cmd_table() {
+	local show_all=false
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-a | --all)
+			show_all=true
+			shift
+			;;
+		*) shift ;;
+		esac
+	done
+
+	log_info "Projects:"
+	echo ""
+	while IFS='|' read -r id name type date status path last_access repo_url config || [[ -n "$id" ]]; do
+		[[ -z "$id" ]] && continue
+		[[ "$id" == "ID" ]] && continue
+		[[ "$id" == "--" ]] && continue
+		[[ "$status" != "active" && "$show_all" != true ]] && continue
+
+		local color
+		case "$status" in
+		active) color="${GREEN}" ;;
+		deleted) color="${RED}" ;;
+		moved) color="${YELLOW}" ;;
+		*) color="${NC}" ;;
+		esac
+
+		printf "${color}| %-10s | %-20s | %-6s | %-19s | %s${NC}\n" "$id" "$name" "$type" "$date" "$status"
+	done <"${SPM_REGISTRY}"
+}
+
+cmd_info() {
+	local query="${1:-}"
+
+	if [[ -z "$query" ]]; then
+		query="$(pwd)"
+	fi
+
+	local line
+	line=$(find_line "$query")
+
+	if [[ -z "$line" ]]; then
+		query=$(basename "$(pwd)")
+		line=$(find_line "$query")
+	fi
+
+	if [[ -z "$line" ]]; then
+		log_error "Project not found: $1"
+		exit 1
+	fi
+
+	local id name type date status path last_access repo_url config
+	id=$(echo "$line" | cut -d'|' -f1)
+	name=$(echo "$line" | cut -d'|' -f2)
+	type=$(echo "$line" | cut -d'|' -f3)
+	date=$(echo "$line" | cut -d'|' -f4)
+	status=$(echo "$line" | cut -d'|' -f5)
+	path=$(echo "$line" | cut -d'|' -f6)
+	last_access=$(echo "$line" | cut -d'|' -f7)
+	repo_url=$(echo "$line" | cut -d'|' -f8)
+	config=$(echo "$line" | cut -d'|' -f9)
+
+	local git_remote
+	if [[ -d "$path/.git" ]]; then
+		git_remote=$(cd "$path" && git config --get remote.origin.url 2>/dev/null)
+		[[ -z "$repo_url" && -n "$git_remote" ]] && repo_url="$git_remote"
+	fi
+
+	echo "ID: ${id}"
+	echo "Name: ${name}"
+	echo "Type: ${type}"
+	echo "Created: ${date}"
+	echo "Status: ${status}"
+	echo "Path: ${path}"
+	[[ -n "$last_access" ]] && echo "Last Access: ${last_access}"
+	[[ -n "$repo_url" ]] && echo "Repo: ${repo_url}"
+	[[ -n "$config" ]] && echo "Config: ${config}"
+}
+
+cmd_archive() {
+	current_dir="$(pwd)"
+
+	local project_info
+	project_info=$(grep "^${current_dir}" "${SPM_REGISTRY}")
+
+	if [[ -z "$project_info" ]]; then
+		log_error "Current directory is not a registered project"
+		exit 1
+	fi
+
+	local archive_dir="${SPM_DIR}/archive"
+	mkdir -p "${archive_dir}"
+
+	local project_name
+	project_name=$(basename "${current_dir}")
+
+	log_info "Archiving to: ${archive_dir}/${project_name}"
+	mv "${current_dir}" "${archive_dir}/"
+
+	set_project_deleted "${current_dir}"
+
+	log_success "Project archived"
+}
+
+cmd_sync() {
+	local dry_run=false
+	local interactive=false
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-d | --dry-run)
+			dry_run=true
+			shift
+			;;
+		-i | --interactive)
+			interactive=true
+			shift
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		*)
+			log_error "Unknown option: $1"
+			usage
+			exit 1
+			;;
+		esac
+	done
+
+	log_info "Syncing registry with filesystem..."
+
+	if [[ ! -s "${SPM_REGISTRY}" ]]; then
+		log_error "No projects registered"
+		exit 1
+	fi
+
+	local base_path="${HOME}/projects"
+
+	local new_count=0
+	local deleted_count=0
+	local moved_count=0
+	local unchanged=0
+
+	while IFS='|' read -r id name type date status stored_path last_access repo_url config || [[ -n "$id" ]]; do
+		[[ -z "$id" ]] && continue
+		[[ "$id" == "ID" ]] && continue
+		[[ "$id" == "--" ]] && continue
+		[[ "$status" != "active" ]] && continue
+
+		if [[ ! -d "$stored_path" ]]; then
+			if [[ "$interactive" == true ]]; then
+				log_warn "Project not found: $name at $stored_path"
+				printf "Archive '%s'? [y/n]: " "$name"
+				read -r answer
+				if [[ "$answer" =~ ^[Yy]$ ]]; then
+					set_project_deleted "$name"
+					((deleted_count++))
+					log_info "Archived: $name"
+				fi
+			else
+				set_project_deleted "$name"
+				((deleted_count++))
+				log_info "Marked deleted: $name"
+			fi
+		else
+			((unchanged++))
+		fi
+	done <"${SPM_REGISTRY}"
+
+	if [[ -d "$base_path" ]]; then
+		while IFS= read -r project_dir; do
+			[[ -z "$project_dir" ]] && continue
+			[[ ! -d "$project_dir" ]] && continue
+
+			local dir_name
+			dir_name=$(basename "$project_dir")
+
+			is_excluded_dir "$dir_name" && continue
+
+			local registered
+			registered=$(grep -F "|${dir_name}|" "${SPM_REGISTRY}" | grep '|active|' | cut -d'|' -f2) || true
+
+			if [[ -z "$registered" ]]; then
+				local project_type
+				project_type=$(detect_project_type "$project_dir")
+
+				if [[ -n "$project_type" ]]; then
+					if [[ "$interactive" == true ]]; then
+						log_info "New project: $dir_name ($project_type)"
+						printf "Import '%s'? [y/n]: " "$dir_name"
+						read -r answer
+						if [[ "$answer" =~ ^[Yy]$ ]]; then
+							local repo_url
+							repo_url=$(git -C "$project_dir" config --get remote.origin.url 2>/dev/null) || repo_url=""
+							register_project "$project_dir" "$project_type" "$repo_url"
+							((new_count++))
+						fi
+					else
+						local repo_url
+						repo_url=$(git -C "$project_dir" config --get remote.origin.url 2>/dev/null) || repo_url=""
+						register_project "$project_dir" "$project_type" "$repo_url"
+						((new_count++))
+					fi
+				fi
+			else
+				((unchanged++))
+			fi
+		done < <(find "$base_path" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+	fi
+
+	if [[ "$dry_run" == true ]]; then
+		log_warn "Dry run - no changes made"
+	fi
+
+	log_success "Sync complete: $new_count new, $deleted_count deleted, $unchanged unchanged"
+}
+
+main() {
+	check_dependencies
+	init_registry
+
+	if [[ $# -eq 0 ]]; then
+		usage
+		exit 1
+	fi
+
+	local command="$1"
+	shift
+
+	case "$command" in
+	new)
+		cmd_new "$@"
+		;;
+	ls)
+		cmd_ls "$@"
+		;;
+	list | table)
+		cmd_table "$@"
+		;;
+	info)
+		cmd_info "$@"
+		;;
+	archive)
+		cmd_archive "$@"
+		;;
+	sync)
+		cmd_sync "$@"
+		;;
+	import)
+		cmd_import "$@"
+		;;
+	scan)
+		cmd_scan "$@"
+		;;
+	help | --help | -h)
+		usage
+		;;
+	*)
+		log_error "Unknown command: ${command}"
+		usage
+		exit 1
+		;;
+	esac
+}
+
+main "$@"

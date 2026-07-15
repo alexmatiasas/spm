@@ -1,0 +1,20 @@
+# ShellCheck configuration
+# https://github.com/koalaman/shellcheck/wiki/Directive
+# https://www.shellcheck.net/wiki/
+
+# Disable specific warnings that are not relevant for this project
+disable=SC1090  # Can't follow non-constant source
+disable=SC1091  # Not following sourced file
+disable=SC2034  # Variable appears unused (may be used in sourced scripts)
+disable=SC2155  # Declare and assign separately (for readability)
+disable=SC2250  # Prefer braces around variable references (style preference)
+
+# Enable additional checks
+enable=add-default-case
+enable=avoid-nullary-conditions
+enable=check-unassigned-uppercase
+enable=deprecate-which
+enable=require-variable-braces
+enable=useless-use-of-cat
+
+exclude=SC2034,SC2086,SC2094

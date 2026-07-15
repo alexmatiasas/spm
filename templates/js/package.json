@@ -1,0 +1,16 @@
+{
+  "name": "PROJECT_NAME",
+  "version": "0.1.0",
+  "description": "DESCRIPTION",
+  "type": "module",
+  "scripts": {
+    "test": "vitest",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "lint:fix": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "vitest": "^2.0.0"
+  }
+}

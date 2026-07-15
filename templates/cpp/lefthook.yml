@@ -1,0 +1,15 @@
+pre-commit:
+  commands:
+    clang-tidy:
+      glob: "*.{cpp,h,hpp}"
+      run: clang-tidy --format-style=google --warnings-as-errors=* {staged_files}
+    clang-format:
+      glob: "*.{cpp,h,hpp}"
+      run: clang-format --style=google --dry-run --Werror {staged_files}
+
+pre-push:
+  commands:
+    cmake-build:
+      run: cmake -B build && cmake --build build
+    ctest:
+      run: ctest --test-dir build

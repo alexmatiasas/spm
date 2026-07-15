@@ -1,0 +1,16 @@
+pre-commit:
+  parallel: true
+  commands:
+    ruff-check:
+      glob: "*.{py,pyi}"
+      run: ruff check --fix {staged_files}
+    ruff-format:
+      glob: "*.{py,pyi}"
+      run: ruff format --check {staged_files}
+
+pre-push:
+  commands:
+    ruff-check:
+      run: ruff check
+    pytest:
+      run: pytest --cov --cov-report=xml
